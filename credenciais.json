@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "my-s-509320",
+  "private_key_id": "85d047899961a78c191b7e87f047aff9f958445f",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCoWIPN2SvlHiJQ\nlUEuCPW9QjMkDHSHOkEXdClHEzGB5RmHQQNzOU95NsMAPs/aVoYqnRFrJGwYH0P1\ntxFk63DeVzrE1Pc+1IkkB3hC9H9jKDg18CHcaIIpGjwUtOKDRuS1+uEMSbLJjo/+\n+lFDafYurxiJQgzBFl+k2sL/03rf8pSeYuD5pd6NETREO5bypazOoc3lmuvja5Ns\nmQRGfXIcvKFp2bMmpPFC7fqCAuO6YR37IpQP+Tb0NzC/nG7cPmu6NYGrvCq3u+lO\n1t5VjJUD3YH4hQLHyhVGSgPdbL6bt+IHPkq1ekhpIS5wIlCuKrJtgUYGm++i3xTH\n9QbX7mSXAgMBAAECggEABIuIkwJZZfuwWV9kcvFXUZLUszGDHXLeBOnrO5nZAH+D\nBTWk+dAGdxphq4NNu90R1FtBzWlz06jlxTUk0iKJYNoJDP1GvSjNCmeXqx3FGumD\nrv7lcVyraS4e3iOVMHHSKJ72GJvHNxvE9ZhrhHfQg/7tNbcHTMqXPJSSw09QF+bw\nHUF7+blyG9qLP+Rrph24UZhsI50k32i+UU+Ed/rFCCVn5NYOJBPs3agufX1hcqsQ\nq8X/ckogSauFONYO40VK1+sJ60AkeneYR03exNnBzRky10upoImaef0ixnLXX+2j\nzF6sFdfxwleDQl0ANcNgYtu0H57VKu8I+AR3l147KQKBgQDdUYXgZF14nrRuhzR7\nzq4JN3HGaxVJPWN0I6LbDsDlTKXgIJTdQqhYV2YWiDAKD+up0FOJfV6+Lx3F5epe\ne/gftPNEq2fqT7CAuHrBWkpwl+SGb9Has+0OOWohLd0ESsmu8YUIwhziLCDKQc73\n8g3MOTDc+V22paq6xHwNXZ5WGQKBgQDCuex5VsJVZNn9CFGMH9a3kULLxpFtzrwt\n38LKVqPZDHiFyV5iJCbmrNP/GFzCCxjQ2AJ+D2wEdVvPauaAz6+2xiNKrh/V1Ox9\nxAzM6GfZsJ/kEGdWggOTTo1i3MpC7hHjJ3/yFWCG/+oD43BSHyCt+Bz0RR78WDRn\n6V3Yy5gGLwKBgCJyBbwe4s1bJgnt0SVTzZJxpquTDwUPION6iGY/rZYCj+6KI6Es\nNrdJIwJuv8tRHwSW/+luMci33JJobkm2Ua/dod8WLl4xeO8Px0tAmkVb3p1t2eOI\nDWUhWns/gB6i5TDtNh9e1s/8vj28cFH2wl7+p7Q8u3Ep56CZ5BTQdUxBAoGAe9pt\nwi+go1fmHr6vv4RwuYk3Bw1haopXvoXYC4JX7LG15sJRufJsm8PJgzMnrHQKcKsz\nyqJcfel3X9IKkluG06XqxJFDxmoLkWKlEZ+wjhF9YT3dvHQtegA4hW0RaMirr+Nr\nybo3Dyau3ZJH2rPZwU1SfTuJnc8sZftUqZO1OhkCgYEAp/c3Q/HU6p2iqlvOJfzs\ndNf+yFctMGf5Do/83TM7af8XI8Zl8Mw3TkuwgkgC9r3nJ83yTfBr80E1BCIDtIeD\n/CVz9dFwao8HxXNxxZuDL+G9fBiCLb+pwcF5SRqwhj+cFMzrbHR6bPXZEekOhKFA\nsirO/12dy8+1qLzBpugOvgg=\n-----END PRIVATE KEY-----\n",
+  "client_email": "tecnico-triagem@my-s-509320.iam.gserviceaccount.com",
+  "client_id": "108882568861919185732",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/tecnico-triagem%40my-s-509320.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
