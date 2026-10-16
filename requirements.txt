@@ -1,9 +1,12 @@
 streamlit
 requests
-fpdf
+fpdf2
 Pillow
 gspread
 oauth2client
 google-api-python-client
 opencv-python-headless
 numpy
+pandas
+sqlalchemy
+psycopg2-binary
