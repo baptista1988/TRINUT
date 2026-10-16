@@ -1,38 +1,34 @@
-import base64
 from datetime import datetime, date
 import json
 import os
 import re
 import cv2
 from fpdf import FPDF
-from PIL import Image
-import gspread
+from PIL import Image, ImageOps
 import numpy as np
-import requests  # Biblioteca adicionada para conectar à API FastAPI
-from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
+import requests
 import streamlit as st
+from sqlalchemy import create_engine, text
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Multi-Cartão Terapêutico - Técnico de Campo",
+    page_title="Triagem Nutricional",
     layout="wide",
     page_icon="🩺",
     initial_sidebar_state="expanded"
 )
 
-# Estilização CSS
+# Estilização CSS com Título Azul e Personalizações
 st.markdown(
     """
     <style>
-    .main-header { font-size: 2.2rem; font-weight: 800; color: #1E3A8A; margin-bottom: 0.2rem; }
-    .sub-header { font-size: 1.05rem; color: #4B5563; margin-bottom: 1.5rem; }
+    .main-header { font-size: 2.2rem; font-weight: 800; color: #1F77B4; margin-bottom: 0.2rem; text-align: center; }
+    .sub-header { font-size: 1.05rem; color: #4B5563; margin-bottom: 1.5rem; text-align: center; }
     .section-card { background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem; }
     .status-alert-grave { background-color: #FEE2E2; color: #991B1B; padding: 1rem; border-radius: 8px; font-weight: bold; }
     .status-alert-mod { background-color: #FEF3C7; color: #92400E; padding: 1rem; border-radius: 8px; font-weight: bold; }
     .status-alert-ok { background-color: #D1FAE5; color: #065F46; padding: 1rem; border-radius: 8px; font-weight: bold; }
-    .stButton>button { width: 100%; font-weight: bold; height: 3rem; background-color: #2563EB; color: white; border-radius: 8px; }
+    .stButton>button { width: 100%; font-weight: bold; height: 3rem; background-color: #1F77B4; color: white; border-radius: 8px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -43,14 +39,82 @@ DIRETORIO_TECNICO = os.path.dirname(os.path.abspath(__file__))
 FICHEIRO_PENDENTES = os.path.join(DIRETORIO_TECNICO, "pendentes.json")
 PASTA_PDFS_PENDENTES = os.path.join(DIRETORIO_TECNICO, "relatorios_pdf")
 PASTA_FOTOS_PENDENTES = os.path.join(DIRETORIO_TECNICO, "fotos_temp")
+DB_LOCAL_NAME = "banco_central_nutricao.db"
 
 # Garantir que as pastas locais existem dentro do diretório do técnico
 os.makedirs(PASTA_PDFS_PENDENTES, exist_ok=True)
 os.makedirs(PASTA_FOTOS_PENDENTES, exist_ok=True)
 
-# Constantes Globais
-ID_PASTA_GOOGLE_DRIVE = "1ksUFOL3XWDyq91rPbfTJQQmof1WIoBa"
-API_URL_DIAGNOSTICAR = "http://127.0.0.1:8000/diagnosticar"
+# URL de conexão com o Supabase (PostgreSQL)
+DATABASE_URL = "postgresql://postgres.fconcnqghekmsgvzpgtn:uXbQ65NDnOkA3L6Q@db.fconcnqghekmsgvzpgtn.supabase.co:6543/postgres"
+
+def get_db_engine():
+    """Retorna a conexão SQLAlchemy com o Supabase ou fallback local."""
+    try:
+        engine = create_engine(DATABASE_URL, pool_size=5, max_overflow=10)
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return engine
+    except Exception:
+        return create_engine(f"sqlite:///{DB_LOCAL_NAME}")
+
+# --- GESTÃO DE ESTADO DE AUTENTICAÇÃO ---
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+if "usuario_atual" not in st.session_state:
+    st.session_state["usuario_atual"] = ""
+if "nome_completo" not in st.session_state:
+    st.session_state["nome_completo"] = ""
+if "provincia_tec" not in st.session_state:
+    st.session_state["provincia_tec"] = ""
+if "distrito_tec" not in st.session_state:
+    st.session_state["distrito_tec"] = ""
+
+# --- ECRÃ DE LOGIN OBRIGATÓRIO (SE NÃO ESTIVER AUTENTICADO) ---
+if not st.session_state["autenticado"]:
+    st.markdown("<div class='main-header'>🩺 Triagem Nutricional</div>", unsafe_allow_html=True)
+    st.markdown("<div class='sub-header'>Múlti-Cartão de Tratamento Terapêutico (MISAU) - Acesso Restrito</div>", unsafe_allow_html=True)
+    
+    col_l1, col_l2, col_l3 = st.columns([1, 1.5, 1])
+    with col_l2:
+        with st.form("form_login_tecnico"):
+            user_input = st.text_input("Username / Utilizador")
+            pass_input = st.text_input("Password / Palavra-passe", type="password")
+            submitted_login = st.form_submit_button("🔑 Entrar no Sistema")
+            
+            if submitted_login:
+                if not user_input.strip() or not pass_input.strip():
+                    st.error("Preencha todos os campos de login.")
+                else:
+                    engine = get_db_engine()
+                    try:
+                        with engine.connect() as conn:
+                            query = text("SELECT * FROM usuarios WHERE username = :u AND password = :p AND lower(tipo) LIKE '%tecnico%'")
+                            resultado = conn.execute(query, {"u": user_input, "p": pass_input}).fetchone()
+                            
+                            if resultado:
+                                st.session_state["autenticado"] = True
+                                st.session_state["usuario_atual"] = user_input
+                                
+                                res_dict = dict(resultado._mapping)
+                                st.session_state["nome_completo"] = res_dict.get("nome", user_input)
+                                prov = res_dict.get("provincia", "")
+                                dist = res_dict.get("distrito", "")
+                                
+                                st.session_state["provincia_tec"] = prov if prov else "Nampula"
+                                st.session_state["distrito_tec"] = dist if dist else ""
+                                
+                                st.success("Login efetuado com sucesso! A carregar painel...")
+                                st.rerun()
+                            else:
+                                st.error("Acesso negado: Utilizador, password incorretos ou conta sem privilégios de TÉCNICO.")
+                    except Exception as e:
+                        st.error(f"Erro ao conectar com a base de dados: {e}")
+    st.stop()
+
+# ==============================================================================
+# PAINEL COMPLETO DO TÉCNICO AUTENTICADO
+# ==============================================================================
 
 PROVINCIAS = [
     "Niassa", "Cabo Delgado", "Nampula", "Zambézia", "Tete", 
@@ -76,7 +140,6 @@ ALIMENTOS_REGIONAIS = {
 }
 
 def limpar_emojis_para_pdf(texto: str) -> str:
-    """Remove caracteres fora do intervalo Latin-1 para evitar exceções Unicode no FPDF."""
     if not texto:
         return ""
     return re.sub(r'[^\x00-\xFF]', '', texto)
@@ -188,35 +251,6 @@ def diagnosticar_nutricao_completo(idade_anos, total_meses, peso, altura, pb, ed
         else:
             return "Obesidade em Idoso", "Nível 3 - Elevado", imc
 
-# --- FUNÇÃO DE INTEGRAÇÃO COM A API FASTAPI & SUPABASE ---
-def chamar_api_diagnosticar(peso, altura, pb, edema, imc, idade, nome_paciente):
-    """Envia os dados antropométricos para a API FastAPI e salva no Supabase."""
-    # Mapear valor do edema para número
-    edema_valor = 0
-    if "+" in str(edema):
-        edema_valor = str(edema).count("+")
-
-    payload = {
-        "peso": float(peso),
-        "altura": float(altura),
-        "pb": float(pb),
-        "edema": edema_valor,
-        "imc": float(imc),
-        "idade": float(idade),
-        "nome_paciente": str(nome_paciente)
-    }
-
-    try:
-        response = requests.post(API_URL_DIAGNOSTICAR, json=payload, timeout=5)
-        if response.status_code == 200:
-            dados = response.json()
-            return True, dados.get("diagnostico", "Diagnóstico Concluído"), dados.get("mensagem", "")
-        else:
-            return False, None, f"Erro na API (Código {response.status_code})"
-    except Exception as e:
-        return False, None, f"Falha ao conectar à API local: {e}"
-
-# --- OPERAÇÕES DE FICHEIROS LOCALIZADOS NA PASTA DO TÉCNICO ---
 def carregar_pendentes_locais():
     if os.path.exists(FICHEIRO_PENDENTES):
         try:
@@ -239,83 +273,37 @@ def limpar_pendentes_locais():
         except Exception:
             pass
 
-def conectar_base_dados_nuvem():
-    caminho_credenciais = os.path.join(DIRETORIO_TECNICO, "credenciais.json")
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, scope)
-    client = gspread.authorize(creds)
-    return client.open("Triagem_Nutricional")
-
-def upload_ficheiro_para_drive(caminho_ficheiro, nome_no_drive, mime_type="application/pdf"):
-    caminho_credenciais = os.path.join(DIRETORIO_TECNICO, "credenciais.json")
-    scope = ["https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(caminho_credenciais, scope)
-    drive_service = build("drive", "v3", credentials=creds)
-
-    metadata_ficheiro = {"name": nome_no_drive, "parents": [ID_PASTA_GOOGLE_DRIVE]}
-    media = MediaFileUpload(caminho_ficheiro, mimetype=mime_type)
-
-    ficheiro = drive_service.files().create(
-        body=metadata_ficheiro, media_body=media, fields='id, webViewLink',
-        supportsAllDrives=True, supportsTeamDrives=True
-    ).execute()
-
-    permissao = {"type": "anyone", "role": "reader"}
-    drive_service.permissions().create(fileId=ficheiro.get("id"), body=permissao, supportsAllDrives=True).execute()
-
-    return ficheiro.get("webViewLink")
-
 def sincronizar_registos_pendentes():
     pendentes = carregar_pendentes_locais()
     if not pendentes:
         return True, "Não existem registos pendentes por sincronizar."
 
-    try:
-        doc = conectar_base_dados_nuvem()
-        sheet = doc.sheet1
-        registos_mantidos = []
+    engine = get_db_engine()
+    pendentes_mantidos = []
 
-        for registro in pendentes:
-            caminho_pdf = registro.get("caminho_pdf")
-            caminho_foto = registro.get("caminho_foto")
-            linha = registro.get("linha_dados")
+    for registro in pendentes:
+        params = registro.get("params_db")
+        try:
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO triagens (
+                        data_hora, tecnico_username, nome_paciente, data_nascimento, idade_formatada,
+                        sexo, raca, nome_responsavel, telefone, provincia, distrito, bairro,
+                        peso, altura, perimetro_braquial, perimetro_craniano, edema, zscore, status, gravidade, conduta, caminho_pdf
+                    ) VALUES (
+                        :dh, :tu, :np, :dn, :if, :sx, :rc, :nr, :tf, :pr, :ds, :br, :ps, :al, :pb, :pc, :ed, :zs, :st, :gr, :cd, :pdf
+                    )
+                """), params)
+        except Exception:
+            pendentes_mantidos.append(registro)
 
-            link_pdf = registro.get("link_pdf", "Sem PDF")
-            link_foto = registro.get("link_foto", "Sem Foto")
-
-            if (not link_pdf or link_pdf == "Pendente Upload") and caminho_pdf and os.path.exists(caminho_pdf):
-                try:
-                    link_pdf = upload_ficheiro_para_drive(caminho_pdf, os.path.basename(caminho_pdf), "application/pdf")
-                except Exception:
-                    pass
-
-            if (not link_foto or link_foto == "Pendente Upload") and caminho_foto and os.path.exists(caminho_foto):
-                try:
-                    link_foto = upload_ficheiro_para_drive(caminho_foto, os.path.basename(caminho_foto), "image/jpeg")
-                except Exception:
-                    pass
-
-            if len(linha) >= 17:
-                linha[15] = link_pdf
-                linha[16] = link_foto
-
-            try:
-                sheet.append_row(linha)
-            except Exception:
-                registro["link_pdf"] = link_pdf
-                registro["link_foto"] = link_foto
-                registos_mantidos.append(registro)
-
-        if not registos_mantidos:
-            limpar_pendentes_locais()
-            return True, "🟢 Registos sincronizados com sucesso!"
-        else:
-            with open(FICHEIRO_PENDENTES, "w", encoding="utf-8") as f:
-                json.dump(registos_mantidos, f, ensure_ascii=False, indent=4)
-            return False, "⚠️ Alguns registos continuam salvos localmente para novo envio."
-
-    except Exception as e:
-        return False, f"⚠ Falha ao conectar ao servidor central: {e}"
+    if not pendentes_mantidos:
+        limpar_pendentes_locais()
+        return True, "🟢 Registos sincronizados com sucesso para o Supabase!"
+    else:
+        with open(FICHEIRO_PENDENTES, "w", encoding="utf-8") as f:
+            json.dump(pendentes_mantidos, f, ensure_ascii=False, indent=4)
+        return False, "⚠️ Alguns registos continuam salvos localmente para novo envio."
 
 def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf = FPDF()
@@ -334,7 +322,6 @@ def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(4)
 
-    # Identificação
     pdf.set_font("Arial", "B", 11)
     pdf.cell(190, 6, txt="1. IDENTIFICAÇÃO E LOCALIZAÇÃO DO PACIENTE", ln=True)
     pdf.set_font("Arial", "", 9)
@@ -353,7 +340,6 @@ def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf.cell(95, 5, txt=f"Tipo Admissão: {dados_dict['tipo_admissao']}", ln=True)
     pdf.ln(3)
 
-    # Antropometria
     pdf.set_font("Arial", "B", 11)
     pdf.cell(190, 6, txt="2. MAPA ANTROPOMÉTRICO E DIAGNÓSTICO", ln=True)
     pdf.set_font("Arial", "", 9)
@@ -367,7 +353,6 @@ def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf.cell(95, 5, txt=f"Diagnóstico: {limpar_emojis_para_pdf(dados_dict['status'])}", ln=True)
     pdf.ln(3)
 
-    # Exames e Controlo
     pdf.set_font("Arial", "B", 11)
     pdf.cell(190, 6, txt="3. TESTES, CONTROLO CLÍNICO E TRATAMENTO", ln=True)
     pdf.set_font("Arial", "", 9)
@@ -380,7 +365,6 @@ def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf.cell(190, 5, txt=f"Dieta Terapêutica: {limpar_emojis_para_pdf(dados_dict['dieta_terapeutica'])}", ln=True)
     pdf.ln(3)
 
-    # Conduta Regional
     pdf.set_font("Arial", "B", 11)
     pdf.cell(190, 6, txt="4. RECOMENDAÇÃO NUTRICIONAL REGIONAL", ln=True)
     pdf.set_font("Arial", "", 9)
@@ -388,32 +372,44 @@ def gerar_pdf_laudo_tecnico(dados_dict, caminho_saida_pdf, caminho_foto=None):
     pdf.multi_cell(190, 5, txt=recomendacao_limpa)
     pdf.ln(4)
 
+    # Inclusão da Foto Real e da Imagem de Visão Computacional no PDF
     if caminho_foto and os.path.exists(caminho_foto):
         try:
             pdf.set_font("Arial", "B", 10)
-            pdf.cell(190, 6, txt="REGISTO FOTOGRÁFICO:", ln=True)
-            pdf.image(caminho_foto, x=10, y=pdf.get_y() + 2, w=50)
+            pdf.cell(190, 6, txt="REGISTO FOTOGRÁFICO E ANÁLISE DE VISÃO COMPUTACIONAL:", ln=True)
+            
+            # Gerar imagem processada de visão computacional (ex: escala de cinza e inversão/contornos)
+            img_original = Image.open(caminho_foto)
+            img_proc = ImageOps.invert(img_original.convert("L"))
+            caminho_foto_proc = caminho_foto.replace(".jpg", "_proc.jpg")
+            img_proc.save(caminho_foto_proc, "JPEG")
+            
+            y_pos = pdf.get_y() + 2
+            # Insere a Foto Real à esquerda
+            pdf.image(caminho_foto, x=10, y=y_pos, w=85)
+            # Insere a Imagem de Visão Computacional à direita
+            pdf.image(caminho_foto_proc, x=105, y=y_pos, w=85)
+            
+            pdf.ln(65)
         except Exception:
             pass
 
     pdf.output(caminho_saida_pdf)
 
-# --- INTERFACE DO TÉCNICO DE CAMPO ---
-st.markdown("<div class='main-header'>🩺 Triagem Nutricional</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-header'>Múlti-Cartão de Tratamento Terapêutico para Desnutrição (MISAU)</div>", unsafe_allow_html=True)
-
-# --- SIDEBAR: MENU DO TÉCNICO ---
+# --- SIDEBAR COM DADOS DO TÉCNICO AUTENTICADO ---
 st.sidebar.title("📌 Menu do Técnico")
+st.sidebar.info(f"👤 **{st.session_state['nome_completo']}**\n\n📍 **Jurisdição:** {st.session_state['provincia_tec']} / {st.session_state['distrito_tec'] if st.session_state['distrito_tec'] else 'Geral'}")
 
-# 1. USERNAME E PASSWORD EM PRIMEIRO LUGAR
-st.sidebar.subheader("🔑 Autenticação do Técnico")
-tecnico_username = st.sidebar.text_input("Username / Utilizador", key="menu_username")
-tecnico_password = st.sidebar.text_input("Password / Palavra-passe", type="password", key="menu_password")
+if st.sidebar.button("🚪 Terminar Sessão"):
+    st.session_state["autenticado"] = False
+    st.session_state["usuario_atual"] = ""
+    st.session_state["nome_completo"] = ""
+    st.session_state["provincia_tec"] = ""
+    st.session_state["distrito_tec"] = ""
+    st.rerun()
 
 st.sidebar.markdown("---")
-
-# Informações de rede e sincronização
-st.sidebar.info("Modo **100% Offline** ativo. Sincronize quando tiver rede.")
+st.sidebar.info("Modo **Sincronização Direta Supabase** ativo.")
 
 pendentes = carregar_pendentes_locais()
 if len(pendentes) > 0:
@@ -429,6 +425,9 @@ if len(pendentes) > 0:
 else:
     st.sidebar.success("🟢 Dispositivo sincronizado.")
 
+# --- INTERFACE DO TÉCNICO DE CAMPO ---
+st.markdown("<div class='main-header'>🩺 Triagem Nutricional</div>", unsafe_allow_html=True)
+st.markdown(f"<div class='sub-header'>Múlti-Cartão de Tratamento Terapêutico para Desnutrição (MISAU) | Técnico: <b>{st.session_state['nome_completo']}</b></div>", unsafe_allow_html=True)
 
 # --- FORMULÁRIO COMPLETO BASEADO NAS FICHAS DO MISAU ---
 with st.form("form_multi_cartao_misau"):
@@ -442,20 +441,21 @@ with st.form("form_multi_cartao_misau"):
         num_ordem = st.text_input("Nº de Ordem Mensal")
         nid = st.text_input("NID (Nº de Identificação do Doente)")
         nome_paciente = st.text_input("Nome do Doente *")
-        data_nascimento = st.date_input("Data de Nascimento *", value=date(1926, 1, 1), max_value=date.today())
+        data_nascimento = st.date_input("Data de Nascimento *", value=date(2020, 1, 1), max_value=date.today())
         sexo = st.radio("Sexo *", ["Masculino", "Feminino"], horizontal=True)
 
     with col2:
         nome_responsavel = st.text_input("Nome do Acompanhante / Responsável *")
         telefone = st.text_input("Contacto Telefónico *")
-        provincia = st.selectbox("Província *", PROVINCIAS)
-        distrito = st.text_input("Distrito *")
+        prov_index = PROVINCIAS.index(st.session_state['provincia_tec']) if st.session_state['provincia_tec'] in PROVINCIAS else 0
+        provincia = st.selectbox("Província *", PROVINCIAS, index=prov_index)
+        distrito = st.text_input("Distrito *", value=st.session_state['distrito_tec'])
         unidade_sanitaria = st.text_input("Unidade Sanitária (US) *")
 
     with col3:
         num_quarto = st.text_input("N.º do Quarto")
         num_cama = st.text_input("N.º da Cama")
-        endereco = st.text_input("Endereço / Bairro *")
+        bairro = st.text_input("Endereço / Bairro *")
         distancia_us = st.text_input("Distância da casa à US (ex: 5 km)")
         data_internamento = st.date_input("Data de Internamento", value=date.today())
 
@@ -606,52 +606,46 @@ with st.form("form_multi_cartao_misau"):
     # --- SEÇÃO 7: TÉCNICO RESPONSÁVEL ---
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
     st.subheader("7. Identificação do Técnico Responsável")
-    nome_tecnico = st.text_input("Nome / Código do Técnico Responsável *", value=tecnico_username if tecnico_username else "")
+    nome_tecnico = st.text_input("Nome / Código do Técnico Responsável *", value=st.session_state["nome_completo"], disabled=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    # --- SEÇÃO 8: TIRAR FOTO DO PACIENTE E CONVERTER FOTO (EM ÚLTIMO LUGAR NO FORMULÁRIO) ---
+    # --- SEÇÃO 8: TIRAR FOTO DO PACIENTE (CÂMERA TRASEIRA AUTOMÁTICA) ---
     st.markdown("<div class='section-card'>", unsafe_allow_html=True)
-    st.subheader("📷 Tirar Foto do Paciente e Converter Foto")
-    foto_buffer = st.camera_input("Capturar Imagem do Paciente / Lesões (Opcional)")
+    st.subheader("📷 Tirar Foto do Paciente")
+    
+    # facing_mode="environment" força o telemóvel a abrir a câmara traseira
+    foto_buffer = st.camera_input("Capturar Imagem do Paciente / Lesões (Opcional)", facing_mode="environment")
 
     caminho_img_temp = None
     if foto_buffer is not None:
         imagem = Image.open(foto_buffer)
         if imagem.mode in ("RGBA", "P"):
             imagem = imagem.convert("RGB")
-        
         caminho_img_temp = os.path.join(PASTA_FOTOS_PENDENTES, f"temp_foto_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg")
         imagem.save(caminho_img_temp, "JPEG")
-        st.success("📸 Foto capturada e convertida com sucesso!")
+        st.success("📸 Foto real capturada com sucesso! A análise de visão computacional será adicionada automaticamente no PDF.")
     st.markdown("</div>", unsafe_allow_html=True)
 
-    submitted = st.form_submit_button("🚀 SUBMETER MULTI-CARTÃO TERAPÊUTICO")
+    submitted = st.form_submit_button("🚀 SUBMISTER MULTI-CARTÃO TERAPÊUTICO")
 
 # --- PROCESSAMENTO DO FORMULÁRIO ---
 if submitted:
-    if not nome_paciente.strip() or not nome_tecnico.strip() or not distrito.strip() or not nome_responsavel.strip() or not unidade_sanitaria.strip():
+    if not nome_paciente.strip() or not distrito.strip() or not nome_responsavel.strip() or not unidade_sanitaria.strip():
         st.error("⚠️ Preencha todos os campos obrigatórios marcados com (*).")
     else:
         idade_anos, total_meses = calcular_idade_detalhada(data_nascimento)
         status, gravidade, imc = diagnosticar_nutricao_completo(idade_anos, total_meses, peso, estatura, perimetro_braquial, edema)
 
-        # --- INTEGRAÇÃO COM A API FASTAPI + SUPABASE ---
-        sucesso_api, diag_ia, msg_supabase = chamar_api_diagnosticar(
-            peso=peso, altura=estatura, pb=perimetro_braquial, edema=edema, imc=imc, idade=idade_anos, nome_paciente=nome_paciente
-        )
-
-        if sucesso_api and diag_ia:
-            status = diag_ia  # Atualiza com a resposta oficial da IA FastAPI
-            st.toast(f"✅ {msg_supabase}", icon="💾")
-
         recomendacao = obter_recomendacao_detalhada(provincia, status, idade_anos)
         data_hora_atual = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
 
-        # Organizar resumos dos medicamentos e exames
         meds_rotina_lista = []
-        if med_acido_folico: meds_rotina_lista.append("Ác. Fólico")
-        if med_antibiotico1: meds_rotina_lista.append(med_antibiotico1)
-        if med_antibiotico2: meds_rotina_lista.append(med_antibiotico2)
+        if med_acido_folico: 
+            meds_rotina_lista.append("Ác. Fólico")
+        if med_antibiotico1: 
+            meds_rotina_lista.append(med_antibiotico1)
+        if med_antibiotico2: 
+            meds_rotina_lista.append(med_antibiotico2)
         meds_rotina_str = ", ".join(meds_rotina_lista) if meds_rotina_lista else "Nenhum"
 
         dieta_str = f"{fase_dieta} | Qtd: {qtd_tomada}" + (" | ATPU" if atpu == "Sim" else "")
@@ -675,30 +669,27 @@ if submitted:
 
         st.info(f"💡 **Recomendação Alimentar Regional ({provincia}):**\n\n{recomendacao}")
 
-        # Gerar PDF do Laudo
         nome_pdf_local = os.path.join(PASTA_PDFS_PENDENTES, f"MultiCartao_{nome_paciente.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf")
 
         dados_dict = {
             "data_hora": data_hora_atual, "num_ordem": num_ordem, "nid": nid, "paciente": nome_paciente,
             "data_nasc": data_nascimento.strftime("%d/%m/%Y"), "idade_anos": idade_anos, "sexo": sexo,
             "responsavel": nome_responsavel, "telefone": telefone, "provincia": provincia, "distrito": distrito,
-            "us": unidade_sanitaria, "num_quarto": num_quarto, "num_cama": num_cama, "endereco": endereco,
+            "us": unidade_sanitaria, "num_quarto": num_quarto, "num_cama": num_cama, "endereco": bairro,
             "distancia_us": distancia_us, "data_internamento": data_internamento.strftime("%d/%m/%Y"),
             "tipo_admissao": tipo_admissao, "peso": peso, "altura": estatura, "peso_alvo": peso_alvo,
             "pe_dp": pe_dp, "pb": perimetro_braquial, "edema": edema, "imc": imc, "status": status,
             "gravidade": gravidade, "teste_hiv": teste_hiv, "teste_tb": teste_tb, "glicemia": glicemia,
             "teste_malaria": teste_malaria, "complicacoes": complicacoes_str, "temp_ax_rec": temp_ax_rec,
             "desidratacao": desidratacao, "vomito": vomito, "meds_rotina": meds_rotina_str,
-            "dieta_terapeutica": dieta_str, "recomendacao": recomendacao, "tecnico": nome_tecnico
+            "dieta_terapeutica": dieta_str, "recomendacao": recomendacao, "tecnico": st.session_state["nome_completo"]
         }
 
         try:
             gerar_pdf_laudo_tecnico(dados_dict, nome_pdf_local, caminho_img_temp)
-            
-            # --- BOTÃO PARA FAZER DOWNLOAD DO PDF GERADO ---
             with open(nome_pdf_local, "rb") as file_pdf:
                 st.download_button(
-                    label="📄 Fazer Download do PDF (Laudo Técnico)",
+                    label="📄 Fazer Download do PDF (Laudo Técnico com Visão Computacional)",
                     data=file_pdf,
                     file_name=os.path.basename(nome_pdf_local),
                     mime="application/pdf"
@@ -706,35 +697,31 @@ if submitted:
         except Exception as e:
             st.error(f"Erro ao gerar o documento PDF: {e}")
 
-        # Preparar dados para o Google Sheets / Sincronização
-        linha_dados_sheets = [
-            data_hora_atual, nid, nome_paciente, data_nascimento.strftime("%d/%m/%Y"), idade_anos, sexo,
-            nome_responsavel, telefone, provincia, distrito, unidade_sanitaria, peso, estatura, imc,
-            perimetro_braquial, edema, status, gravidade, tipo_admissao, meds_rotina_str, dieta_str,
-            "Pendente Upload", "Pendente Upload"
-        ]
-
-        objeto_offline = {
-            "linha_dados": linha_dados_sheets,
-            "caminho_pdf": nome_pdf_local,
-            "caminho_foto": caminho_img_temp,
-            "link_pdf": "Pendente Upload",
-            "link_foto": "Pendente Upload"
+        params_db = {
+            "dh": data_hora_atual,
+            "tu": st.session_state["nome_completo"],
+            "np": nome_paciente,
+            "dn": data_nascimento.strftime("%d/%m/%Y"),
+            "if": f"{idade_anos} anos",
+            "sx": sexo,
+            "rc": "Não informado",
+            "nr": nome_responsavel,
+            "tf": telefone,
+            "pr": provincia,
+            "ds": distrito,
+            "br": bairro,
+            "ps": float(peso),
+            "al": float(estatura),
+            "pb": float(perimetro_braquial),
+            "pc": 0.0,
+            "ed": edema,
+            "zs": float(imc),
+            "st": status,
+            "gr": gravidade,
+            "cd": recomendacao,
+            "pdf": nome_pdf_local
         }
 
+        engine = get_db_engine()
         try:
-            link_pdf = upload_ficheiro_para_drive(nome_pdf_local, os.path.basename(nome_pdf_local), "application/pdf")
-            linha_dados_sheets[-2] = link_pdf
-
-            if caminho_img_temp and os.path.exists(caminho_img_temp):
-                link_foto = upload_ficheiro_para_drive(caminho_img_temp, os.path.basename(caminho_img_temp), "image/jpeg")
-                linha_dados_sheets[-1] = link_foto
-
-            doc = conectar_base_dados_nuvem()
-            sheet = doc.sheet1
-            sheet.append_row(linha_dados_sheets)
-            sincronizar_registos_pendentes()
-            st.success("✅ Multi-Cartão Terapêutico enviado e sincronizado com sucesso!")
-        except Exception:
-            guardar_pendente_local(objeto_offline)
-            st.warning("📶 Gravado offline no dispositivo. Será sincronizado com a nuvem assim que houver rede.")
+            with engine
