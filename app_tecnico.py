@@ -1,3 +1,10 @@
+# --- CONFIGURAÇÃO DA PÁGINA (Substitui o nome padrão do Streamlit) ---
+st.set_page_config(
+    page_title="Triagem Nutricional",
+    page_icon="🩺",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 from datetime import datetime, date
 import json
 import os
