@@ -724,4 +724,17 @@ if submitted:
 
         engine = get_db_engine()
         try:
-            with engine
+            with engine.begin() as conn:
+                conn.execute(text("""
+                    INSERT INTO triagens (
+                        data_hora, tecnico_username, nome_paciente, data_nascimento, idade_formatada,
+                        sexo, raca, nome_responsavel, telefone, provincia, distrito, bairro,
+                        peso, altura, perimetro_braquial, perimetro_craniano, edema, zscore, status, gravidade, conduta, caminho_pdf
+                    ) VALUES (
+                        :dh, :tu, :np, :dn, :if, :sx, :rc, :nr, :tf, :pr, :ds, :br, :ps, :al, :pb, :pc, :ed, :zs, :st, :gr, :cd, :pdf
+                    )
+                """), params_db)
+            st.success("✅ Multi-Cartão submetido com sucesso! Os dados já chegaram ao Supabase e aparecem no painel do gestor.")
+        except Exception as err:
+            guardar_pendente_local({"params_db": params_db})
+            st.warning(f"📶 Erro de conexão com o Supabase ({err}). O registo foi guardado localmente e será enviado quando houver rede.")
