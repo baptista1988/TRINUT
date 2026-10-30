@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 streamlit
 requests
 fpdf
@@ -7,3 +8,17 @@ oauth2client
 google-api-python-client
 opencv-python-headless
 numpy
+=======
+streamlit
+requests
+fpdf2
+Pillow
+gspread
+oauth2client
+google-api-python-client
+opencv-python-headless
+numpy
+pandas
+sqlalchemy
+psycopg2-binary
+>>>>>>> f36770e1a5ff03f01539c09334820fbd5b959928
