@@ -1,0 +1,9 @@
+streamlit
+requests
+fpdf
+Pillow
+gspread
+oauth2client
+google-api-python-client
+opencv-python-headless
+numpy
